@@ -77,8 +77,12 @@ class AdvancedBandarmologyService:
         
         # Calculate average order size
         order_sizes = [o['amount'] for o in orders]
-        avg_size = np.mean(order_sizes)
-        std_size = np.std(order_sizes)
+        if len(order_sizes) > 0:
+            avg_size = np.mean(order_sizes) if len(order_sizes) > 0 else 0
+            std_size = np.std(order_sizes) if len(order_sizes) > 1 else 0
+        else:
+            avg_size = 0
+            std_size = 0
         
         for order in orders:
             score = self._calculate_fake_order_score(order, current_price, avg_size, std_size)
@@ -355,8 +359,12 @@ class AdvancedBandarmologyService:
         Classify each order as REAL, SUSPICIOUS, or FAKE
         """
         order_sizes = [o['amount'] for o in orders]
-        avg_size = np.mean(order_sizes)
-        std_size = np.std(order_sizes)
+        if len(order_sizes) > 0:
+            avg_size = np.mean(order_sizes)
+            std_size = np.std(order_sizes) if len(order_sizes) > 1 else 0
+        else:
+            avg_size = 0
+            std_size = 0
         
         real_orders = []
         suspicious_orders = []
@@ -390,8 +398,12 @@ class AdvancedBandarmologyService:
         Calculate price direction based on REAL orders only (excluding fake orders)
         """
         order_sizes = [o['amount'] for o in orders]
-        avg_size = np.mean(order_sizes)
-        std_size = np.std(order_sizes)
+        if len(order_sizes) > 0:
+            avg_size = np.mean(order_sizes)
+            std_size = np.std(order_sizes) if len(order_sizes) > 1 else 0
+        else:
+            avg_size = 0
+            std_size = 0
         
         # Filter to get only real orders (score < 40)
         real_orders = []
