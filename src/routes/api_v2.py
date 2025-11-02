@@ -35,19 +35,30 @@ def get_summaries_v2():
         
         # Get all pairs
         pairs = indodax_service.get_pairs()
-        if not pairs:
-            return jsonify({'error': 'Failed to fetch pairs'}), 500
+        if not pairs or not isinstance(pairs, list):
+            return jsonify({'error': 'Failed to fetch pairs or invalid format'}), 500
         
         # Get ticker all for prices
         ticker_all = indodax_service.get_ticker_all()
-        tickers = ticker_all.get('tickers', {}) if ticker_all else {}
+        if not ticker_all or not isinstance(ticker_all, dict):
+            return jsonify({'error': 'Failed to fetch tickers or invalid format'}), 500
+        
+        tickers = ticker_all.get('tickers', {})
+        if not isinstance(tickers, dict):
+            return jsonify({'error': 'Invalid tickers format'}), 500
         
         cryptos = []
         
         # Process ALL pairs (no limit)
         for pair in pairs:
-            pair_id = pair['id']
-            symbol = pair['symbol']
+            if not isinstance(pair, dict):
+                continue
+            
+            pair_id = pair.get('id')
+            symbol = pair.get('symbol')
+            
+            if not pair_id or not symbol:
+                continue
             
             try:
                 # Convert pair_id format: 'btcidr' -> 'btc_idr'

@@ -190,7 +190,10 @@ class AdvancedBandarmologyService:
             return self._get_empty_whale_response()
         
         order_amounts = [o['amount'] for o in orders]
-        whale_threshold = np.percentile(order_amounts, self.whale_percentile)
+        if len(order_amounts) > 0:
+            whale_threshold = np.percentile(order_amounts, self.whale_percentile)
+        else:
+            whale_threshold = 0
         
         whale_orders = [o for o in orders if o['amount'] >= whale_threshold]
         whale_buy = [o for o in whale_orders if o['side'] == 'buy']
