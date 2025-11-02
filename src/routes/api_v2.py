@@ -149,9 +149,14 @@ def get_recommended():
     Returns cryptos with BUY/STRONG_BUY signals, sorted by score
     """
     try:
-        # Get all summaries
+        # Get all summaries - call the function and get the response
         summaries_response = get_summaries_v2()
-        summaries_data = summaries_response.get_json()
+        
+        # Handle both Response object and tuple (Response, status_code)
+        if isinstance(summaries_response, tuple):
+            summaries_data = summaries_response[0].get_json()
+        else:
+            summaries_data = summaries_response.get_json()
         
         if 'error' in summaries_data:
             return jsonify(summaries_data), 500
