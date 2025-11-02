@@ -136,10 +136,47 @@ def get_summaries_v2():
                     action = 'STRONG_SELL'
                     risk_level = 'VERY_HIGH'
                 
+                # Calculate component scores for display
+                # Technical score based on price action
+                technical_score = 50
+                if price_change_24h > 10:
+                    technical_score = 75
+                elif price_change_24h > 5:
+                    technical_score = 65
+                elif price_change_24h < -10:
+                    technical_score = 25
+                elif price_change_24h < -5:
+                    technical_score = 35
+                
+                # Order book score based on spread
+                orderbook_score = 50
+                if buy_price > 0 and sell_price > 0:
+                    spread_pct = ((sell_price - buy_price) / buy_price) * 100
+                    if spread_pct < 0.5:
+                        orderbook_score = 80
+                    elif spread_pct < 1:
+                        orderbook_score = 65
+                    elif spread_pct > 2:
+                        orderbook_score = 30
+                
+                # Liquidity score based on volume
+                liquidity_score = 50
+                if volume_24h_idr > 1_000_000_000:
+                    liquidity_score = 85
+                elif volume_24h_idr > 100_000_000:
+                    liquidity_score = 70
+                elif volume_24h_idr > 10_000_000:
+                    liquidity_score = 55
+                else:
+                    liquidity_score = 30
+                
                 # Create basic summary (no deep analysis)
                 summary = {
                     'action': action,
                     'total_score': max(0, min(100, score)),
+                    'technical_score': technical_score,
+                    'orderbook_score': orderbook_score,
+                    'liquidity_score': liquidity_score,
                     'risk_level': risk_level,
                     'sentiment': {
                         'label': 'NEUTRAL',
