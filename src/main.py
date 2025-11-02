@@ -35,8 +35,5 @@ def serve(path):
             return "index.html not found", 404
 
 
-if __name__ == '__main__':
-    # For local development only
-    port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('FLASK_ENV') == 'development'
-    app.run(host='0.0.0.0', port=port, debug=debug)
+# Entry point removed - use wsgi.py or gunicorn to run this app
+# For local development: gunicorn --bind 0.0.0.0:5000 --reload wsgi:app
