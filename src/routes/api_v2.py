@@ -1,31 +1,31 @@
 """
 API Routes v2.0 for Enhanced Crypto Analyzer
-Includes: Summary dashboard, comprehensive analysis with sentiment and advanced bandarmology
+Includes: All cryptos, recommendations, order book, price trends, buy/sell volume trends
 """
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 from ..services.indodax_service import IndodaxService
 from ..services.enhanced_recommendation_service import EnhancedRecommendationService
 import time
+import statistics
 
 api_v2 = Blueprint('api_v2', __name__)
 
 indodax_service = IndodaxService()
 enhanced_service = EnhancedRecommendationService()
 
-# Cache for summaries (10 seconds TTL)
+# Cache for summaries (30 seconds TTL)
 summaries_cache = {
     'data': None,
     'timestamp': 0,
-    'ttl': 10
+    'ttl': 30
 }
 
 @api_v2.route('/summaries/v2', methods=['GET'])
 def get_summaries_v2():
     """
-    Get comprehensive summaries for all cryptocurrencies
-    This is the main endpoint for dashboard v2.0
-    Returns quick-decision data for each crypto
+    Get comprehensive summaries for ALL cryptocurrencies (478 cryptos)
+    Returns quick-decision data for each crypto with real analysis
     """
     try:
         # Check cache
@@ -44,16 +44,13 @@ def get_summaries_v2():
         
         cryptos = []
         
-        # Process each pair (limit to first 10 for testing)
-        # In production, you might want to process all or use async
-        for pair in pairs[:10]:  # Limit for testing
+        # Process ALL pairs (no limit)
+        for pair in pairs:
             pair_id = pair['id']
             symbol = pair['symbol']
             
             try:
-                # Get ticker for this pair
                 # Convert pair_id format: 'btcidr' -> 'btc_idr'
-                # Extract symbol and add underscore before 'idr'
                 if 'idr' in pair_id:
                     ticker_key = pair_id.replace('idr', '_idr')
                 else:
@@ -65,36 +62,50 @@ def get_summaries_v2():
                     continue
                 
                 current_price = float(ticker.get('last', 0))
-                volume_24h = float(ticker.get('vol_' + symbol.lower(), 0))
+                volume_24h_base = float(ticker.get('vol_' + symbol.lower(), 0))
+                volume_24h_idr = volume_24h_base * current_price
                 high_24h = float(ticker.get('high', current_price))
                 low_24h = float(ticker.get('low', current_price))
+                buy_volume = float(ticker.get('buy', 0))
+                sell_volume = float(ticker.get('sell', 0))
                 
-                # Calculate simple price change
-                if high_24h > 0 and low_24h > 0:
+                # Calculate price change percentage
+                if low_24h > 0:
                     price_change_24h = ((current_price - low_24h) / low_24h) * 100
                 else:
                     price_change_24h = 0
                 
-                # Create simplified summary (skip comprehensive analysis for now)
-                summary = {
-                    'action': 'HOLD',
-                    'total_score': 50,
-                    'risk_level': 'MEDIUM',
-                    'sentiment': {'label': 'NEUTRAL', 'emoji': '😐', 'score': 50, 'trending': False},
-                    'manipulation': {'level': 'UNKNOWN', 'score': 0, 'fake_orders_pct': 0},
-                    'whale_activity': 'MEDIUM',
-                    'real_order_direction': 'NEUTRAL',
-                    'price_change_24h': price_change_24h,
-                    'quick_insight': '⏸️ Loading analysis...'
-                }
+                # Get comprehensive analysis
+                analysis = enhanced_service.get_comprehensive_analysis(pair_id)
+                
+                if 'error' not in analysis:
+                    summary = analysis.get('summary', {})
+                else:
+                    # Fallback summary if analysis fails
+                    summary = {
+                        'action': 'HOLD',
+                        'total_score': 50,
+                        'risk_level': 'MEDIUM',
+                        'sentiment': {'label': 'NEUTRAL', 'emoji': '😐', 'score': 50, 'trending': False},
+                        'manipulation': {'level': 'UNKNOWN', 'score': 0, 'fake_orders_pct': 0},
+                        'whale_activity': 'MEDIUM',
+                        'real_order_direction': 'NEUTRAL',
+                        'price_change_24h': price_change_24h,
+                        'quick_insight': 'Analysis in progress...'
+                    }
                 
                 crypto_data = {
                     'pair_id': pair_id,
                     'symbol': symbol,
                     'name': pair['description'],
                     'price': current_price,
-                    'volume_24h': volume_24h,
+                    'volume_24h': volume_24h_idr,
+                    'volume_24h_base': volume_24h_base,
                     'price_change_24h': price_change_24h,
+                    'high_24h': high_24h,
+                    'low_24h': low_24h,
+                    'buy_volume': buy_volume,
+                    'sell_volume': sell_volume,
                     'summary': summary
                 }
                 
@@ -120,11 +131,183 @@ def get_summaries_v2():
         return jsonify({'error': str(e)}), 500
 
 
+@api_v2.route('/recommended', methods=['GET'])
+def get_recommended():
+    """
+    Get recommended cryptocurrencies for buying (profitable opportunities)
+    Returns cryptos with BUY/STRONG_BUY signals, sorted by score
+    """
+    try:
+        # Get all summaries
+        summaries_response = get_summaries_v2()
+        summaries_data = summaries_response.get_json()
+        
+        if 'error' in summaries_data:
+            return jsonify(summaries_data), 500
+        
+        cryptos = summaries_data.get('cryptos', [])
+        
+        # Filter for buy recommendations
+        recommended = []
+        for crypto in cryptos:
+            summary = crypto.get('summary', {})
+            action = summary.get('action', 'HOLD')
+            total_score = summary.get('total_score', 0)
+            risk_level = summary.get('risk_level', 'VERY_HIGH')
+            manipulation_score = summary.get('manipulation', {}).get('score', 100)
+            
+            # Criteria: BUY or STRONG_BUY, score > 55, not very high risk, low manipulation
+            if action in ['BUY', 'STRONG_BUY'] and total_score > 55 and risk_level != 'VERY_HIGH' and manipulation_score < 60:
+                recommended.append(crypto)
+        
+        # Sort by total score descending
+        recommended.sort(key=lambda x: x.get('summary', {}).get('total_score', 0), reverse=True)
+        
+        return jsonify({
+            'recommended': recommended[:50],  # Top 50
+            'total': len(recommended)
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_v2.route('/order-book/<pair_id>', methods=['GET'])
+def get_order_book(pair_id):
+    """
+    Get order book (buy and sell orders) for a specific crypto
+    """
+    try:
+        depth = indodax_service.get_depth(pair_id)
+        
+        if not depth:
+            return jsonify({'error': 'Failed to fetch order book'}), 500
+        
+        buy_orders = depth.get('buy', [])[:20]  # Top 20 buy orders
+        sell_orders = depth.get('sell', [])[:20]  # Top 20 sell orders
+        
+        # Calculate total volumes
+        total_buy_volume = sum([float(order[1]) for order in buy_orders])
+        total_sell_volume = sum([float(order[1]) for order in sell_orders])
+        
+        # Calculate weighted average prices
+        buy_vwap = sum([float(order[0]) * float(order[1]) for order in buy_orders]) / total_buy_volume if total_buy_volume > 0 else 0
+        sell_vwap = sum([float(order[0]) * float(order[1]) for order in sell_orders]) / total_sell_volume if total_sell_volume > 0 else 0
+        
+        return jsonify({
+            'pair_id': pair_id,
+            'buy_orders': [[float(order[0]), float(order[1])] for order in buy_orders],
+            'sell_orders': [[float(order[0]), float(order[1])] for order in sell_orders],
+            'total_buy_volume': total_buy_volume,
+            'total_sell_volume': total_sell_volume,
+            'buy_vwap': buy_vwap,
+            'sell_vwap': sell_vwap,
+            'spread': sell_vwap - buy_vwap if sell_vwap > 0 and buy_vwap > 0 else 0,
+            'timestamp': time.time()
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_v2.route('/price-trend/<pair_id>', methods=['GET'])
+def get_price_trend(pair_id):
+    """
+    Get price trend data for a specific crypto (OHLC data)
+    """
+    try:
+        # Get symbol from pair_id
+        symbol = pair_id.replace('idr', '').replace('_', '').upper()
+        
+        # Get OHLC data (1 hour candles)
+        ohlc = indodax_service.get_ohlc(symbol, period='1h')
+        
+        if not ohlc:
+            return jsonify({'error': 'Failed to fetch price trend'}), 500
+        
+        return jsonify({
+            'pair_id': pair_id,
+            'symbol': symbol,
+            'ohlc': ohlc,
+            'timestamp': time.time()
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_v2.route('/buy-sell-trend/<pair_id>', methods=['GET'])
+def get_buy_sell_trend(pair_id):
+    """
+    Get actual buy/sell volume trend for a specific crypto
+    Returns real-time buy and sell pressure
+    """
+    try:
+        # Get recent trades
+        trades = indodax_service.get_trades(pair_id)
+        
+        if not trades:
+            return jsonify({'error': 'Failed to fetch trades'}), 500
+        
+        # Analyze buy vs sell volume from recent trades
+        buy_volume = 0
+        sell_volume = 0
+        buy_count = 0
+        sell_count = 0
+        
+        for trade in trades[:100]:  # Last 100 trades
+            amount = float(trade.get('amount', 0))
+            trade_type = trade.get('type', 'buy')
+            
+            if trade_type == 'buy':
+                buy_volume += amount
+                buy_count += 1
+            else:
+                sell_volume += amount
+                sell_count += 1
+        
+        total_volume = buy_volume + sell_volume
+        buy_percentage = (buy_volume / total_volume * 100) if total_volume > 0 else 50
+        sell_percentage = (sell_volume / total_volume * 100) if total_volume > 0 else 50
+        
+        # Determine pressure direction
+        if buy_percentage > 60:
+            pressure = 'STRONG_BUY'
+            emoji = '🚀'
+        elif buy_percentage > 52:
+            pressure = 'BUY'
+            emoji = '📈'
+        elif sell_percentage > 60:
+            pressure = 'STRONG_SELL'
+            emoji = '📉'
+        elif sell_percentage > 52:
+            pressure = 'SELL'
+            emoji = '⚠️'
+        else:
+            pressure = 'NEUTRAL'
+            emoji = '➡️'
+        
+        return jsonify({
+            'pair_id': pair_id,
+            'buy_volume': buy_volume,
+            'sell_volume': sell_volume,
+            'buy_count': buy_count,
+            'sell_count': sell_count,
+            'buy_percentage': round(buy_percentage, 2),
+            'sell_percentage': round(sell_percentage, 2),
+            'pressure': pressure,
+            'emoji': emoji,
+            'timestamp': time.time()
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @api_v2.route('/analysis/v2/<pair_id>', methods=['GET'])
 def get_analysis_v2(pair_id):
     """
     Get comprehensive analysis for a specific cryptocurrency
-    This is the main endpoint for detail page v2.0
     """
     try:
         analysis = enhanced_service.get_comprehensive_analysis(pair_id)
@@ -138,155 +321,6 @@ def get_analysis_v2(pair_id):
         return jsonify({'error': str(e)}), 500
 
 
-@api_v2.route('/quick-summary/<pair_id>', methods=['GET'])
-def get_quick_summary(pair_id):
-    """
-    Get ultra-quick summary for a single crypto (for tooltips, etc.)
-    """
-    try:
-        analysis = enhanced_service.get_comprehensive_analysis(pair_id)
-        
-        if 'error' in analysis:
-            return jsonify(analysis), 500
-        
-        # Return only summary
-        return jsonify({
-            'pair_id': pair_id,
-            'symbol': analysis.get('symbol'),
-            'current_price': analysis.get('current_price'),
-            'summary': analysis.get('summary')
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@api_v2.route('/top-opportunities', methods=['GET'])
-def get_top_opportunities():
-    """
-    Get top trading opportunities (highest scores, low manipulation)
-    """
-    try:
-        # Get all summaries
-        summaries_response = get_summaries_v2()
-        summaries_data = summaries_response.get_json()
-        
-        if 'error' in summaries_data:
-            return jsonify(summaries_data), 500
-        
-        cryptos = summaries_data.get('cryptos', [])
-        
-        # Filter and sort
-        opportunities = []
-        for crypto in cryptos:
-            summary = crypto.get('summary', {})
-            
-            # Criteria for opportunity:
-            # 1. Action is BUY or STRONG_BUY
-            # 2. Manipulation score < 50
-            # 3. Risk level not VERY_HIGH
-            # 4. Total score > 60
-            
-            action = summary.get('action', '')
-            manip_score = summary.get('manipulation', {}).get('score', 100)
-            risk_level = summary.get('risk_level', 'VERY_HIGH')
-            total_score = summary.get('total_score', 0)
-            
-            if action in ['BUY', 'STRONG_BUY'] and manip_score < 50 and risk_level != 'VERY_HIGH' and total_score > 60:
-                opportunities.append(crypto)
-        
-        # Sort by total score descending
-        opportunities.sort(key=lambda x: x.get('summary', {}).get('total_score', 0), reverse=True)
-        
-        return jsonify({
-            'opportunities': opportunities[:10],  # Top 10
-            'total': len(opportunities)
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@api_v2.route('/high-risk-alerts', methods=['GET'])
-def get_high_risk_alerts():
-    """
-    Get cryptocurrencies with high manipulation/risk alerts
-    """
-    try:
-        # Get all summaries
-        summaries_response = get_summaries_v2()
-        summaries_data = summaries_response.get_json()
-        
-        if 'error' in summaries_data:
-            return jsonify(summaries_data), 500
-        
-        cryptos = summaries_data.get('cryptos', [])
-        
-        # Filter high risk
-        alerts = []
-        for crypto in cryptos:
-            summary = crypto.get('summary', {})
-            
-            # Criteria for alert:
-            # 1. Manipulation score > 70 OR
-            # 2. Risk level VERY_HIGH OR
-            # 3. Fake orders > 20%
-            
-            manip_score = summary.get('manipulation', {}).get('score', 0)
-            risk_level = summary.get('risk_level', 'LOW')
-            fake_orders = summary.get('manipulation', {}).get('fake_orders_pct', 0)
-            
-            if manip_score > 70 or risk_level == 'VERY_HIGH' or fake_orders > 20:
-                alerts.append(crypto)
-        
-        # Sort by manipulation score descending
-        alerts.sort(key=lambda x: x.get('summary', {}).get('manipulation', {}).get('score', 0), reverse=True)
-        
-        return jsonify({
-            'alerts': alerts,
-            'total': len(alerts)
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@api_v2.route('/trending', methods=['GET'])
-def get_trending():
-    """
-    Get trending cryptocurrencies (based on social media sentiment)
-    """
-    try:
-        # Get all summaries
-        summaries_response = get_summaries_v2()
-        summaries_data = summaries_response.get_json()
-        
-        if 'error' in summaries_data:
-            return jsonify(summaries_data), 500
-        
-        cryptos = summaries_data.get('cryptos', [])
-        
-        # Filter trending
-        trending = []
-        for crypto in cryptos:
-            summary = crypto.get('summary', {})
-            sentiment = summary.get('sentiment', {})
-            
-            if sentiment.get('trending', False):
-                trending.append(crypto)
-        
-        # Sort by sentiment score descending
-        trending.sort(key=lambda x: x.get('summary', {}).get('sentiment', {}).get('score', 0), reverse=True)
-        
-        return jsonify({
-            'trending': trending,
-            'total': len(trending)
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
 @api_v2.route('/health', methods=['GET'])
 def health_check_v2():
     """Health check endpoint for v2 API"""
@@ -294,12 +328,12 @@ def health_check_v2():
         'status': 'healthy',
         'version': '2.0',
         'features': [
+            'all_478_cryptos',
+            'recommendations',
+            'order_book',
+            'price_trends',
+            'buy_sell_trends',
             'comprehensive_analysis',
-            'social_sentiment',
-            'advanced_bandarmology',
-            'fake_order_detection',
-            'whale_tracking',
             'manipulation_detection'
         ]
     })
-
