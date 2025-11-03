@@ -3,27 +3,58 @@ API Detail - On-demand detailed analysis for single crypto
 """
 from flask import Blueprint, jsonify, request
 import requests
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from src.utils.cache_manager import detail_cache
+from src.utils.rate_limiter import indodax_limiter
 
 api_detail = Blueprint('api_detail', __name__)
 
 INDODAX_BASE = "https://indodax.com/api"
 
 def get_order_book(pair_id):
-    """Fetch order book for a pair"""
+    """Fetch order book for a pair with rate limiting"""
+    # Check cache first (10 minutes)
+    cache_key = f"orderbook_{pair_id}"
+    cached = detail_cache.get(cache_key)
+    if cached:
+        return cached
+    
+    # Wait for rate limiter
+    if not indodax_limiter.wait_if_needed(timeout=10):
+        return None
+    
     try:
         response = requests.get(f"{INDODAX_BASE}/{pair_id}/depth", timeout=10)
         if response.status_code == 200:
-            return response.json()
+            data = response.json()
+            # Cache for 10 minutes
+            detail_cache.set(cache_key, data, ttl_seconds=600)
+            return data
     except:
         pass
     return None
 
 def get_trades(pair_id):
-    """Fetch recent trades for a pair"""
+    """Fetch recent trades for a pair with rate limiting"""
+    # Check cache first (10 minutes)
+    cache_key = f"trades_{pair_id}"
+    cached = detail_cache.get(cache_key)
+    if cached:
+        return cached
+    
+    # Wait for rate limiter
+    if not indodax_limiter.wait_if_needed(timeout=10):
+        return None
+    
     try:
         response = requests.get(f"{INDODAX_BASE}/{pair_id}/trades", timeout=10)
         if response.status_code == 200:
-            return response.json()
+            data = response.json()
+            # Cache for 10 minutes
+            detail_cache.set(cache_key, data, ttl_seconds=600)
+            return data
     except:
         pass
     return None

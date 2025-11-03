@@ -7,18 +7,18 @@ from flask import Blueprint, jsonify, request
 from ..services.indodax_service import IndodaxService
 from ..services.enhanced_recommendation_service import EnhancedRecommendationService
 import time
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from src.utils.cache_manager import summary_cache
+from src.utils.rate_limiter import indodax_limiter
 
 api_v2 = Blueprint('api_v2', __name__)
 
 indodax_service = IndodaxService()
 enhanced_service = EnhancedRecommendationService()
 
-# Cache for summaries (60 seconds TTL - longer cache)
-summaries_cache = {
-    'data': None,
-    'timestamp': 0,
-    'ttl': 60
-}
+# Using global cache manager now (5 minutes TTL)
 
 @api_v2.route('/summaries/v2', methods=['GET'])
 def get_summaries_v2():
@@ -28,10 +28,12 @@ def get_summaries_v2():
     Deep analysis is done on-demand when user clicks on a crypto
     """
     try:
-        # Check cache
+        # Check cache (5 minutes TTL)
         current_time = time.time()
-        if summaries_cache['data'] and (current_time - summaries_cache['timestamp']) < summaries_cache['ttl']:
-            return jsonify(summaries_cache['data'])
+        cache_key = 'summaries_v2'
+        cached_data = summary_cache.get(cache_key)
+        if cached_data:
+            return jsonify(cached_data)
         
         # Get all pairs
         pairs = indodax_service.get_pairs()
@@ -223,9 +225,8 @@ def get_summaries_v2():
             'note': 'Basic analysis. Click on crypto for detailed analysis.'
         }
         
-        # Update cache
-        summaries_cache['data'] = result
-        summaries_cache['timestamp'] = current_time
+        # Update cache (5 minutes = 300 seconds)
+        summary_cache.set(cache_key, result, ttl_seconds=300)
         
         return jsonify(result)
         
