@@ -306,6 +306,10 @@ def get_crypto_detail(pair_id):
     Get detailed analysis for a single crypto
     """
     try:
+        # Convert pair_id format: b2idr -> b2_idr
+        if '_' not in pair_id and 'idr' in pair_id.lower():
+            pair_id = pair_id.lower().replace('idr', '_idr')
+        
         # Fetch detailed data
         order_book = get_order_book(pair_id)
         trades = get_trades(pair_id)
