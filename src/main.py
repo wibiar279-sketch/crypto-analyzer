@@ -7,6 +7,7 @@ from flask import Flask, send_from_directory
 from flask_cors import CORS
 from src.routes.api import api_bp
 from src.routes.api_v2 import api_v2
+from src.routes.api_v3_detailed import api_v3
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
 app.config['SECRET_KEY'] = 'asdf#FGSgvasgf$5$WGT'
@@ -17,6 +18,7 @@ CORS(app)
 # Register API blueprints
 app.register_blueprint(api_bp)
 app.register_blueprint(api_v2, url_prefix='/api')
+app.register_blueprint(api_v3, url_prefix='/api')
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
